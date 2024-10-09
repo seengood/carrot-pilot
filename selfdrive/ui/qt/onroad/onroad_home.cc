@@ -147,16 +147,31 @@ void OnroadWindow::offroadTransition(bool offroad) {
 
 void OnroadWindow::paintEvent(QPaintEvent *event) {
 #if 1
+    static QColor bg_last = bg_colors[STATUS_DISENGAGED];
+    static QColor bg_long_last = bg_colors[STATUS_DISENGAGED];
     QPainter p(this);
     int borderThickness = UI_BORDER_SIZE;
+    if (bg_last != bg) {
+        QRect leftRectH(0, 0, borderThickness, height() / 2);
+        p.fillRect(leftRectH, QColor(bg.red(), bg.green(), bg.blue(), 255));
+        QRect rightRectH(width() - borderThickness, 0, borderThickness, height() / 2);
+        p.fillRect(rightRectH, QColor(bg.red(), bg.green(), bg.blue(), 255));
+        bg_last = bg;
+    }
+
+    if (bg_long_last != bg_long) {
+        QRect leftRectL(0, height() / 2, borderThickness, height() / 2);
+        p.fillRect(leftRectL, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
+        QRect rightRectL(width() - borderThickness, height() / 2, borderThickness, height() / 2);
+        p.fillRect(rightRectL, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
+        bg_long_last = bg_long
+    }
+
+
     QRect topRect(0, 0, width(), borderThickness);
     p.fillRect(topRect, QColor(bg.red(), bg.green(), bg.blue(), 255));
     QRect bottomRect(0, height() - borderThickness, width(), borderThickness);
     p.fillRect(bottomRect, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
-    QRect leftRect(0, 0, borderThickness, height());
-    p.fillRect(leftRect, QColor(bg.red(), bg.green(), bg.blue(), 255));
-    QRect rightRect(width() - borderThickness, 0, borderThickness, height());
-    p.fillRect(rightRect, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
 
     UIState* s = uiState();
     const SubMaster& sm = *(s->sm);
@@ -164,13 +179,13 @@ void OnroadWindow::paintEvent(QPaintEvent *event) {
     float a_ego = car_state.getAEgo();
 
     static float a_ego_width = 0.0;
-    a_ego_width = a_ego_width * 0.9 + (width() * std::abs(a_ego) / 4.0) * 0.1;
+    a_ego_width = a_ego_width * 0.5 + (width() * std::abs(a_ego) / 4.0) * 0.5;
 
     QRect rect(width() / 2 - a_ego_width, height() - 50, a_ego_width * 2, 50);
     p.fillRect(rect, (a_ego >= 0) ? QColor(128, 202, 37, 0xf1) : QColor(255, 0, 0, 0xf1));
 
     static float steering_angle_pos = 0.0;
-    steering_angle_pos = steering_angle_pos * 0.9 + (width() / 2. - width() / 2. * car_state.getSteeringAngleDeg() / 360) * 0.1;
+    steering_angle_pos = steering_angle_pos * 0.5 + (width() / 2. - width() / 2. * car_state.getSteeringAngleDeg() / 180) * 0.5;
     int x_st = (int)steering_angle_pos - 50;
     int x_ed = (int)steering_angle_pos + 50;
     if (x_st < 0) x_st = 0;
