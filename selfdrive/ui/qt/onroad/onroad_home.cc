@@ -133,9 +133,10 @@ void OnroadWindow::updateState(const UIState &s) {
     // repaint border
     bg = bgColor;
     bg_long = bgColor_long;
-    update();
+    //update();
   }
   else {
+      update();
       updateStateText();
   }
 }
@@ -145,6 +146,43 @@ void OnroadWindow::offroadTransition(bool offroad) {
 }
 
 void OnroadWindow::paintEvent(QPaintEvent *event) {
+#if 1
+    QPainter p(this);
+    int borderThickness = UI_BORDER_SIZE;
+    QRect topRect(0, 0, width(), borderThickness);
+    p.fillRect(topRect, QColor(bg.red(), bg.green(), bg.blue(), 255));
+    QRect bottomRect(0, height() - borderThickness, width(), borderThickness);
+    p.fillRect(bottomRect, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
+    QRect leftRect(0, 0, borderThickness, height());
+    p.fillRect(leftRect, QColor(bg.red(), bg.green(), bg.blue(), 255));
+    QRect rightRect(width() - borderThickness, 0, borderThickness, height());
+    p.fillRect(rightRect, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
+
+    UIState* s = uiState();
+    const SubMaster& sm = *(s->sm);
+    auto car_state = sm["carState"].getCarState();
+    float a_ego = car_state.getAEgo();
+
+    static float a_ego_width = 0.0;
+    a_ego_width = a_ego_width * 0.9 + (width() * std::abs(a_ego) / 4.0) * 0.1;
+
+    QRect rect(width() / 2 - a_ego_width, height() - 50, a_ego_width * 2, 50);
+    p.fillRect(rect, (a_ego >= 0) ? QColor(128, 202, 37, 0xf1) : QColor(255, 0, 0, 0xf1));
+
+    static float steering_angle_pos = 0.0;
+    steering_angle_pos = steering_angle_pos * 0.9 + (width() / 2. - width() / 2. * car_state.getSteeringAngleDeg() / 360) * 0.1;
+    int x_st = (int)steering_angle_pos - 50;
+    int x_ed = (int)steering_angle_pos + 50;
+    if (x_st < 0) x_st = 0;
+    if (x_ed < 50) x_ed = 50;
+    if (x_st > width() - 50) x_st = width() - 50;
+    if (x_ed > width()) x_ed = width();
+    QRect rect_st(x_st, 0, x_ed - x_st, 50);
+    p.fillRect(rect_st, QColor(128, 202, 37, 0xf1));
+
+    //printf("update state a_ego_width: %f, steering_angle_pos: %f\n", a_ego_width, steering_angle_pos);
+
+#else
   QPainter p(this);
   //p.fillRect(rect(), QColor(bg.red(), bg.green(), bg.blue(), 255));
   QRect upperRect(0, 0, width(), height() / 2);
@@ -152,30 +190,7 @@ void OnroadWindow::paintEvent(QPaintEvent *event) {
 
   QRect lowerRect(0, height() / 2, width(), height() / 2);
   p.fillRect(lowerRect, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
-
-  UIState* s = uiState();
-  const SubMaster& sm = *(s->sm);
-  auto car_state = sm["carState"].getCarState();
-  float a_ego = car_state.getAEgo();
-
-  static float a_ego_width = 0.0;
-  a_ego_width = a_ego_width * 0.9 + (width() * std::abs(a_ego) / 4.0) * 0.1;
-
-  QRect rect(width() / 2 - a_ego_width, height() - 50, a_ego_width * 2, 50);
-  p.fillRect(rect, (a_ego >= 0) ? QColor(128, 202, 37, 0xf1) : QColor(255, 0, 0, 0xf1));
-
-  static float steering_angle_pos = 0.0;
-  steering_angle_pos = steering_angle_pos * 0.9 + (width() / 2. - width() / 2. * car_state.getSteeringAngleDeg() / 360) * 0.1;
-  int x_st = (int)steering_angle_pos - 50;
-  int x_ed = (int)steering_angle_pos + 50;
-  if (x_st < 0) x_st = 0;
-  if (x_ed < 50) x_ed = 50;
-  if (x_st > width() - 50) x_st = width() - 50;
-  if (x_ed > width()) x_ed = width();
-  QRect rect_st(x_st, 0, x_ed - x_st, 50);
-  p.fillRect(rect_st, QColor(128, 202, 37, 0xf1));
-
-  printf("update state a_ego_width: %f, steering_angle_pos: %f\n", a_ego_width, steering_angle_pos);
+#endif
 
 }
 void OnroadWindow::updateStateText() {
