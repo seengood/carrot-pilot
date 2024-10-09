@@ -164,7 +164,7 @@ void OnroadWindow::paintEvent(QPaintEvent *event) {
         p.fillRect(leftRectL, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
         QRect rightRectL(width() - borderThickness, height() / 2, borderThickness, height() / 2);
         p.fillRect(rightRectL, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
-        bg_long_last = bg_long
+        bg_long_last = bg_long;
     }
 
 
