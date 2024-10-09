@@ -158,14 +158,16 @@ void OnroadWindow::paintEvent(QPaintEvent *event) {
   auto car_state = sm["carState"].getCarState();
   float a_ego = car_state.getAEgo();
 
-  float a_ego_width = width() * std::abs(a_ego) / 4.0;
+  static float a_ego_width = 0.0;
+  a_ego_width = a_ego_width * 0.9 + (width()* std::abs(a_ego) / 4.0) * 0.1;
   
-  QRect rect(width()/2 - a_ego_width, height() - 50, a_ego_width, height());
+  QRect rect(width()/2 - a_ego_width, height() - 50, a_ego_width, 50);
   p.fillRect(rect, (a_ego>=0) ? QColor(128, 202, 37, 0xf1) : QColor(255, 0, 0, 0xf1));
 
-  int steering_angle_pos = (int)(width() / 2. * car_state.getSteeringAngleDeg() / 360);
-  int x_st = steering_angle_pos - 50;
-  int x_ed = steering_angle_pos + 50;
+  static float steering_angle_pos = 0.0;
+  steering_angle_pos = steering_angle_pos * 0.9 + (width() / 2. - width() / 2. * car_state.getSteeringAngleDeg() / 360) * 0.1;
+  int x_st = (int)steering_angle_pos - 50;
+  int x_ed = (int)steering_angle_pos + 50;
   if (x_st < 0) x_st = 0;
   if (x_ed > width()) x_ed = width();
   QRect rect_st(x_st, 0, x_ed - x_st, 50);
