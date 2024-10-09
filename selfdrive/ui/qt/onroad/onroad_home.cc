@@ -147,26 +147,17 @@ void OnroadWindow::offroadTransition(bool offroad) {
 
 void OnroadWindow::paintEvent(QPaintEvent *event) {
 #if 1
-    static QColor bg_last = bg_colors[STATUS_DISENGAGED];
-    static QColor bg_long_last = bg_colors[STATUS_DISENGAGED];
     QPainter p(this);
     int borderThickness = UI_BORDER_SIZE;
-    if (bg_last != bg) {
-        QRect leftRectH(0, 0, borderThickness, height() / 2);
-        p.fillRect(leftRectH, QColor(bg.red(), bg.green(), bg.blue(), 255));
-        QRect rightRectH(width() - borderThickness, 0, borderThickness, height() / 2);
-        p.fillRect(rightRectH, QColor(bg.red(), bg.green(), bg.blue(), 255));
-        bg_last = bg;
-    }
+    QRect leftRectH(0, 0, borderThickness, height() / 2);
+    p.fillRect(leftRectH, QColor(bg.red(), bg.green(), bg.blue(), 255));
+    QRect rightRectH(width() - borderThickness, 0, borderThickness, height() / 2);
+    p.fillRect(rightRectH, QColor(bg.red(), bg.green(), bg.blue(), 255));
 
-    if (bg_long_last != bg_long) {
-        QRect leftRectL(0, height() / 2, borderThickness, height() / 2);
-        p.fillRect(leftRectL, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
-        QRect rightRectL(width() - borderThickness, height() / 2, borderThickness, height() / 2);
-        p.fillRect(rightRectL, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
-        bg_long_last = bg_long;
-    }
-
+    QRect leftRectL(0, height() / 2, borderThickness, height() / 2);
+    p.fillRect(leftRectL, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
+    QRect rightRectL(width() - borderThickness, height() / 2, borderThickness, height() / 2);
+    p.fillRect(rightRectL, QColor(bg_long.red(), bg_long.green(), bg_long.blue(), 255));
 
     QRect topRect(0, 0, width(), borderThickness);
     p.fillRect(topRect, QColor(bg.red(), bg.green(), bg.blue(), 255));
