@@ -11,6 +11,8 @@ import select
 import fcntl
 import struct
 import math
+import os
+#import pytz
 
 from ftplib import FTP
 from openpilot.common.realtime import Ratekeeper
@@ -18,7 +20,6 @@ from openpilot.common.params import Params
 import cereal.messaging as messaging
 from cereal import log
 from common.numpy_fast import clip, interp
-import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
 from common.filter_simple import StreamingMovingAverage
 
 NetworkType = log.DeviceState.NetworkType
@@ -348,10 +349,15 @@ class CarrotMan:
         time.sleep(1)
 
   def save_toggle_values(self):
-    toggle_values = fleet.get_all_toggle_values()
-    file_path = os.path.join('/data', 'toggle_values.json')
-    with open(file_path, 'w') as file:
-      json.dump(toggle_values, file, indent=2) 
+    try:
+      import openpilot.selfdrive.frogpilot.fleetmanager.helpers as fleet
+
+      toggle_values = fleet.get_all_toggle_values()
+      file_path = os.path.join('/data', 'toggle_values.json')
+      with open(file_path, 'w') as file:
+        json.dump(toggle_values, file, indent=2)
+    except Exception as e:
+      print(f"save_toggle_values error: {e}")
 
   def carrot_cmd_zmq(self):
 
@@ -500,7 +506,7 @@ class CarrotServ:
     
     self.nRoadLimitSpeed = 30
 
-    self.active = 0     ## 1: CarrotMan Active, 2: sdi active , 3: speed decel active, 4: section active
+    self.active = 0     ## 1: CarrotMan Active, 2: sdi active , 3: speed decel active, 4: section active, 5: bump active
     self.active_count = 0
     self.active_sdi_count = 0
     self.active_sdi_count_max = 80
@@ -583,6 +589,7 @@ class CarrotServ:
     self.autoNaviSpeedCtrlEnd = float(self.params.get_int("AutoNaviSpeedCtrlEnd"))
     self.autoNaviSpeedSafetyFactor = float(self.params.get_int("AutoNaviSpeedSafetyFactor")) * 0.01
     self.autoNaviSpeedDecelRate = float(self.params.get_int("AutoNaviSpeedDecelRate")) * 0.01
+    self.autoNaviCountDownMode = self.params.get_int("AutoNaviCountDownMode")
 
     self.autoTurnControlSpeedTurn = self.params.get_int("AutoTurnControlSpeedTurn")
     #self.autoTurnMapChange = self.params.get_int("AutoTurnMapChange")
@@ -929,10 +936,10 @@ class CarrotServ:
 
   def update_auto_turn(self, v_ego_kph, sm, x_turn_info, x_dist_to_turn, check_steer=False):
     turn_speed = self.autoTurnControlSpeedTurn
-    stop_speed = 1
-    turn_dist_for_speed = 5 #50
-    fork_dist_for_speed = 5 #20
     fork_speed = self.nRoadLimitSpeed
+    stop_speed = 1
+    turn_dist_for_speed = self.autoTurnControlTurnEnd * turn_speed / 3.6 # 5
+    fork_dist_for_speed = self.autoTurnControlTurnEnd * fork_speed / 3.6 # 5
     stop_dist_for_speed = 5
     start_fork_dist = interp(self.nRoadLimitSpeed, [30, 50, 100], [160, 200, 350])
     start_turn_dist = interp(self.nTBTNextRoadWidth, [5, 10], [43, 60])
@@ -1015,6 +1022,7 @@ class CarrotServ:
       self.nSdiType = self.nSdiBlockType = self.nSdiPlusBlockType = -1
       self.nTBTTurnType = self.nTBTTurnTypeNext = -1
       self.roadcate = 8
+      self.nGoPosDist = 0
       
     if self.xSpdType < 0 or self.xSpdDist <= 0:
       self.xSpdType = -1
@@ -1031,7 +1039,7 @@ class CarrotServ:
       safe_sec = self.autoNaviSpeedBumpTime if self.xSpdType == 22 else self.autoNaviSpeedCtrlEnd
       decel = self.autoNaviSpeedDecelRate
       sdi_speed = min(sdi_speed, self.calculate_current_speed(self.xSpdDist, self.xSpdLimit, safe_sec, decel))
-      self.active = 3
+      self.active = 5 if self.xSpdType == 22 else 3
       if self.xSpdType == 4:
         sdi_speed = self.xSpdLimit
         self.active = 4
@@ -1042,9 +1050,9 @@ class CarrotServ:
 
     if self.nSdiType  >= 0: # or self.active > 0:      
       #self.debugText = f"Atc:{atc_desired:.1f},{self.xTurnInfo}:{self.xDistToTurn:.1f}, I({self.nTBTNextRoadWidth},{self.roadcate}) Atc2:{atc_desired_next:.1f},{self.xTurnInfoNext},{self.xDistToTurnNext:.1f}"
-      self.debugText = f" {self._get_sdi_descr(self.nSdiType)}:{self.nSdiType}/{self.nSdiSpeedLimit}/{self.nSdiDist},BLOCK:{self.nSdiBlockType}/{self.nSdiBlockSpeed}/{self.nSdiBlockDist}, PLUS:{self.nSdiPlusType}/{self.nSdiPlusSpeedLimit}/{self.nSdiPlusDist}"
-    elif self.nGoPosDist > 0 and self.active > 1:
-      self.debugText = " 목적지:{:.1f}km/{:.1f}분 남음".format(self.nGoPosDist/1000., self.nGoPosTime / 60)
+      self.debugText = f" {self.nSdiType}/{self.nSdiSpeedLimit}/{self.nSdiDist},BLOCK:{self.nSdiBlockType}/{self.nSdiBlockSpeed}/{self.nSdiBlockDist}, PLUS:{self.nSdiPlusType}/{self.nSdiPlusSpeedLimit}/{self.nSdiPlusDist}"
+    #elif self.nGoPosDist > 0 and self.active > 1:
+    #  self.debugText = " 목적지:{:.1f}km/{:.1f}분 남음".format(self.nGoPosDist/1000., self.nGoPosTime / 60)
     else:
       self.debugText = ""
       
@@ -1063,11 +1071,16 @@ class CarrotServ:
     desired_speed, source = min(speed_n_sources, key=lambda x: x[0])
 
     left_spd_sec = 100
-    if self.xSpdDist > 0:
-      left_spd_sec = int(max(self.xSpdDist - v_ego, 1) / max(1, v_ego))
     left_tbt_sec = 100
-    if self.xDistToTurn > 0:
-      left_tbt_sec = int(max(self.xDistToTurn - v_ego, 1) / max(1, v_ego))
+    if self.autoNaviCountDownMode > 0:
+      if self.xSpdType == 22 and self.autoNaviCountDownMode == 1: # speed bump
+        pass
+      else:
+        if self.xSpdDist > 0:
+          left_spd_sec = int(max(self.xSpdDist - v_ego, 1) / max(1, v_ego) + 0.5)
+          
+      if self.xDistToTurn > 0:
+        left_tbt_sec = int(max(self.xDistToTurn - v_ego, 1) / max(1, v_ego) + 0.5)
 
     self._update_cmd()
     if False:
@@ -1125,13 +1138,75 @@ class CarrotServ:
     msg.carrotMan.xPosLat = float(self.vpPosPointLat)
     msg.carrotMan.xPosLon = float(self.vpPosPointLon)
 
+    msg.carrotMan.nGoPosDist = self.nGoPosDist
+    msg.carrotMan.nGoPosTime = self.nGoPosTime
+    msg.carrotMan.szSdiDescr = self._get_sdi_descr(self.nSdiType)
+
     pm.send('carrotMan', msg)
     
+  def _update_system_time(self, epoch_time_remote, timezone_remote):
+    epoch_time = int(time.time())
+    if epoch_time_remote > 0:
+      epoch_time_offset = epoch_time_remote - epoch_time
+      print(f"epoch_time_offset = {epoch_time_offset}")
+      if abs(epoch_time_offset) > 60:
+        os.system(f"sudo timedatectl set-timezone {timezone_remote}")        
+        formatted_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(epoch_time_remote))
+        print(f"Setting system time to: {formatted_time}")
+        os.system(f'sudo date -s "{formatted_time}"')
+
+  def set_time(self, epoch_time, timezone):
+    import datetime
+    new_time = datetime.datetime.utcfromtimestamp(epoch_time)
+    localtime_path = "/data/etc/localtime"
+
+    no_timezone = False
+    try:
+      if os.path.getsize(localtime_path) == 0:
+        no_timezone = True  
+    except:
+      no_timezone = True
+
+    diff = datetime.datetime.utcnow() - new_time
+    if abs(diff) < datetime.timedelta(seconds=10) and not no_timezone:
+      #print(f"Time diff too small: {diff}")
+      return
+
+    print(f"Setting time to {new_time}, diff={diff}")
+    zoneinfo_path = f"/usr/share/zoneinfo/{timezone}"
+    if os.path.exists(localtime_path) or os.path.islink(localtime_path):
+        try:
+            subprocess.run(["sudo", "rm", "-f", localtime_path], check=True)
+            print(f"Removed existing file or link: {localtime_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error removing {localtime_path}: {e}")
+            return
+    try:
+        subprocess.run(["sudo", "ln", "-s", zoneinfo_path, localtime_path], check=True)
+        print(f"Timezone successfully set to: {timezone}")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to set timezone to {timezone}: {e}")
+      
+
+    try:
+      subprocess.run(f"TZ=UTC date -s '{new_time}'", shell=True, check=True)
+      #subprocess.run()
+    except subprocess.CalledProcessError:
+      print("timed.failed_setting_time")
+
   def update(self, json):
     if json == None:
       return
     if "carrotIndex" in json:
       self.carrotIndex = int(json.get("carrotIndex"))
+
+    if self.carrotIndex % 60 == 0 and "epochTime" in json:
+      # op는 ntp를 사용하기때문에... 필요없는 루틴으로 보임.
+      timezone_remote = json.get("timezone", "Asia/Seoul")
+      
+      self.set_time(int(json.get("epochTime")), timezone_remote)
+                                                    
+      #self._update_system_time(int(json.get("epochTime")), timezone_remote)
 
     if "carrotCmd" in json:
       print(json.get("carrotCmd"), json.get("carrotArg"))
@@ -1191,6 +1266,8 @@ class CarrotServ:
       self.nGoPosDist = int(json.get("nGoPosDist", 0))
       self.nGoPosTime = int(json.get("nGoPosTime", 0))
       self.szPosRoadName = json.get("szPosRoadName", "")
+      if self.szPosRoadName == "null":
+        self.szPosRoadName = ""
 
       self.vpPosPointLat = float(json.get("vpPosPointLat", self.vpPosPointLat))
       self.vpPosPointLon = float(json.get("vpPosPointLon", self.vpPosPointLon))

@@ -10,7 +10,7 @@ from openpilot.common.realtime import config_realtime_process, Priority, Ratekee
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import get_car_interface
-from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
+from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature, get_lag_adjusted_curvature
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
@@ -38,7 +38,7 @@ class Controls:
 
     self.sm = messaging.SubMaster(['liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'carState', 'carOutput',
-                                   'carrotMan',
+                                   'carrotMan', 'lateralPlan', 'radarState',
                                    'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
@@ -118,7 +118,15 @@ class Controls:
     actuators.accel, actuators.aTargetNow, actuators.jerk = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan)
 
     # Steering PID loop and lateral MPC
-    self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, model_v2.action.desiredCurvature)
+    lat_plan = self.sm['lateralPlan']
+    curve_speed_abs = abs(self.sm['carrotMan'].vTurnSpeed)
+    self.lanefull_mode_enabled = lat_plan.useLaneLines and self.params.get_int("UseLaneLineSpeedApply") > 0 and curve_speed_abs > self.params.get_int("UseLaneLineCurveSpeed")
+    steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
+    if self.lanefull_mode_enabled:
+      desired_curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay)
+      self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, desired_curvature)
+    else:
+      self.desired_curvature = clip_curvature(CS.vEgo, self.desired_curvature, model_v2.action.desiredCurvature)
     actuators.curvature = self.desired_curvature
     actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                                             self.steer_limited, self.desired_curvature,
@@ -161,12 +169,25 @@ class Controls:
     hudControl.activeCarrot = self.sm['carrotMan'].active
     
     lp = self.sm['longitudinalPlan']
-    hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
+    if self.CP.pcmCruise:
+      speed_from_pcm = self.params.get_int("SpeedFromPCM")
+      if speed_from_pcm == 1:
+        hudControl.setSpeed = float(CS.vCruiseCluster * CV.KPH_TO_MS)
+      elif speed_from_pcm == 2:
+        hudControl.setSpeed = float(max(30/3.6, desired_kph * CV.KPH_TO_MS))
+      else:
+        hudControl.setSpeed = float(max(30/3.6, setSpeed))
+    else:
+      hudControl.setSpeed = setSpeed if lp.xState == 3 else float(desired_kph * CV.KPH_TO_MS)
     hudControl.speedVisible = CC.enabled
     hudControl.lanesVisible = CC.enabled
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
     hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
+
+    leadOne = self.sm['radarState'].leadOne
+    hudControl.leadDistance = leadOne.dRel if leadOne.status else 0
+    hudControl.leadRelSpeed = leadOne.vRel if leadOne.status else 0
 
     hudControl.rightLaneVisible = True
     hudControl.leftLaneVisible = True
@@ -212,6 +233,7 @@ class Controls:
     elif lat_tuning == 'torque':
       cs.lateralControlState.torqueState = lac_log
 
+    cs.activeLaneLine = self.lanefull_mode_enabled
     self.pm.send('controlsState', dat)
 
     # carControl

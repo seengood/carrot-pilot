@@ -151,9 +151,11 @@ class CarInterface(CarInterfaceBase):
     ret.openpilotLongitudinalControl = experimental_long and ret.experimentalLongitudinalAvailable
 
     # carrot, if camera_scc enabled, enable openpilotLongitudinalControl
-    if ret.flags & HyundaiFlags.CAMERA_SCC.value:
+    if ret.flags & HyundaiFlags.CAMERA_SCC.value or params.get_int("EnableRadarTracks") > 0:
       ret.radarUnavailable = False
       ret.openpilotLongitudinalControl = True
+
+    ret.radarUnavailable = False  # carrot, hyundai cars have radar
 
     ret.pcmCruise = not ret.openpilotLongitudinalControl
     ret.startingState = False # True  # carrot

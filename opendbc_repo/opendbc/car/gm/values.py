@@ -12,14 +12,14 @@ Ecu = CarParams.Ecu
 
 class CarControllerParams:
   STEER_MAX = 300  # GM limit is 3Nm. Used by carcontroller to generate LKA output
-  STEER_STEP = 3  # Active control frames per command (~33hz)
+  STEER_STEP = 4  # Active control frames per command (~33hz)
   INACTIVE_STEER_STEP = 10  # Inactive control frames per command (10hz)
   STEER_DELTA_UP = 5  # Delta rates require review due to observed EPS weakness
   STEER_DELTA_DOWN = 7
   STEER_DRIVER_ALLOWANCE = 65
   STEER_DRIVER_MULTIPLIER = 4
   STEER_DRIVER_FACTOR = 100
-  NEAR_STOP_BRAKE_PHASE = 0.5  # m/s
+  NEAR_STOP_BRAKE_PHASE = 0.1 #0.5  # m/s
 
   # Heartbeat for dash "Service Adaptive Cruise" and "Service Front Camera"
   ADAS_KEEPALIVE_STEP = 100
@@ -244,7 +244,7 @@ class CAR(Platforms):
   )
   CHEVROLET_TRAX = GMPlatformConfig(
     [GMCarDocs("Chevrolet TRAX 2024")],
-    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=15.7, centerToFrontRatio=0.4),
+    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.1, centerToFrontRatio=0.4),
   )
 
 class CruiseButtons:

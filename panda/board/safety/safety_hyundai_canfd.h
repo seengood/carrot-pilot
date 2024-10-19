@@ -177,7 +177,7 @@ const int HYUNDAI_PARAM_CANFD_HDA2_ALT_STEERING = 128;
 const int HYUNDAI_PARAM_ACAN_PANDA = 512;
 bool hyundai_canfd_alt_buttons = false;
 bool hyundai_canfd_hda2_alt_steering = false;
-bool hyundai_acan_panda = false;
+//bool hyundai_acan_panda = false;
 
 int canfd_tx_addr[32] = { 80, 81, 272, 282, 298, 352, 353, 354, 442, 485, 416, 437, 506, 474, 480, 490, 512, 676, 866, 837, 1402, 908, 1848, 0, };
 uint32_t canfd_tx_time[32] = { 0, };
@@ -323,8 +323,9 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *to_send) {
     int button = GET_BYTE(to_send, 2) & 0x7U;
     bool is_cancel = (button == HYUNDAI_BTN_CANCEL);
     bool is_resume = (button == HYUNDAI_BTN_RESUME);
+    bool is_set = (button == HYUNDAI_BTN_SET);
 
-    bool allowed = (is_cancel && cruise_engaged_prev) || (is_resume && controls_allowed);
+    bool allowed = (is_cancel && cruise_engaged_prev) || (is_resume && controls_allowed) || (is_set && controls_allowed);
     if (!allowed) {
       tx = false;
     }

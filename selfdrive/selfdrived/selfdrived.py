@@ -21,7 +21,6 @@ from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 from openpilot.selfdrive.controls.lib.latcontrol import MIN_LATERAL_CONTROL_SPEED
 
-from openpilot.system.hardware import HARDWARE
 from openpilot.system.version import get_build_metadata
 
 REPLAY = "REPLAY" in os.environ
@@ -79,6 +78,7 @@ class SelfdriveD:
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'livePose',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
+                                   'carrotMan',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug'] + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
                                   ignore_alive=ignore, ignore_avg_freq=ignore+['radarState',],
@@ -87,9 +87,6 @@ class SelfdriveD:
     # read params
     self.is_metric = self.params.get_bool("IsMetric")
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
-
-    # detect sound card presence and ensure successful init
-    sounds_available = HARDWARE.get_sound_card_online()
 
     car_recognized = self.CP.carName != 'mock'
 
@@ -120,6 +117,8 @@ class SelfdriveD:
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
+    self.atc_type_last = ""
+
     # Determine startup event
     self.startup_event = EventName.startup if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster
     if not car_recognized:
@@ -129,8 +128,6 @@ class SelfdriveD:
     elif self.CP.secOcRequired and not self.CP.secOcKeyAvailable:
       self.startup_event = EventName.startupNoSecOcKey
 
-    if not sounds_available:
-      self.events.add(EventName.soundsUnavailable, static=True)
     if not car_recognized:
       self.events.add(EventName.carUnrecognized, static=True)
       set_offroad_alert("Offroad_CarUnrecognized", True)
@@ -228,6 +225,16 @@ class SelfdriveD:
       if self.sm['driverAssistance'].leftLaneDeparture or self.sm['driverAssistance'].rightLaneDeparture:
         self.events.add(EventName.ldw)
 
+    if self.sm.alive['carrotMan']:
+      atc_type = self.sm['carrotMan'].atcType
+      if atc_type != self.atc_type_last:
+        if "prepare" not in atc_type and "prepare" in self.atc_type_last: # fork left/right prepare -> fork left/right
+          if "fork" in atc_type:
+            self.events.add(EventName.audioLaneChange)
+        elif "turn" in atc_type and "turn" not in self.atc_type_last:   # fork left/right -> turn left/right
+          self.events.add(EventName.audioTurn)
+        self.atc_type_last = atc_type
+    
     # Handle lane change
     if self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
       direction = self.sm['modelV2'].meta.laneChangeDirection

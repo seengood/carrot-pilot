@@ -1,4 +1,4 @@
-﻿#include "selfdrive/ui/carrot.h"
+#include "selfdrive/ui/carrot.h"
 
 #include <cassert>
 #include <cmath>
@@ -70,6 +70,72 @@ static void ui_draw_text(const UIState* s, float x, float y, const char* string,
     nvgFillColor(s->vg, color);
     nvgText(s->vg, x, y, string, NULL);
 }
+static void ui_draw_text_vg(NVGcontext* vg, float x, float y, const char* string, float size, NVGcolor color, const char* font_name, float borderWidth = 3.0, float shadowOffset = 0.0, NVGcolor borderColor = COLOR_BLACK, NVGcolor shadowColor = COLOR_BLACK) {
+    //y += 6;
+    nvgFontFace(vg, font_name);
+    nvgFontSize(vg, size);
+    if (borderWidth > 0.0) {
+        //NVGcolor borderColor = COLOR_BLACK;
+        nvgFillColor(vg, borderColor);
+        for (int i = 0; i < 360; i += 45) {
+            float angle = i * NVG_PI / 180.0f;
+            float offsetX = borderWidth * cos(angle);
+            float offsetY = borderWidth * sin(angle);
+            nvgText(vg, x + offsetX, y + offsetY, string, NULL);
+        }
+    }
+    if (shadowOffset != 0.0) {
+        //NVGcolor shadowColor = COLOR_BLACK;
+        nvgFillColor(vg, shadowColor);
+        nvgText(vg, x + shadowOffset, y + shadowOffset, string, NULL);
+    }
+    nvgFillColor(vg, color);
+    nvgText(vg, x, y, string, NULL);
+}
+void ui_draw_line_vg(NVGcontext* vg, const QPolygonF& vd, NVGcolor* color, NVGpaint* paint, float stroke = 0.0, NVGcolor strokeColor = COLOR_WHITE) {
+    if (vd.size() == 0) return;
+
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, vd.at(0).x(), vd.at(0).y());
+    for (int i = 1; i < vd.size(); i++) {
+        nvgLineTo(vg, vd.at(i).x(), vd.at(i).y());
+    }
+    nvgClosePath(vg);
+    if (color) {
+        nvgFillColor(vg, *color);
+    }
+    else if (paint) {
+        nvgFillPaint(vg, *paint);
+    }
+    nvgFill(vg);
+    if (stroke > 0.0) {
+        nvgStrokeColor(vg, strokeColor);
+        nvgStrokeWidth(vg, stroke);
+        nvgStroke(vg);
+    }
+}
+void ui_draw_line2_vg(NVGcontext* vg, float x[], float y[], int size, NVGcolor* color, NVGpaint* paint, float stroke = 0.0, NVGcolor strokeColor = COLOR_WHITE) {
+
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, x[0], y[0]);
+    for (int i = 1; i < size; i++) {
+        nvgLineTo(vg, x[i], y[i]);
+    }
+    nvgClosePath(vg);
+    if (color) {
+        nvgFillColor(vg, *color);
+    }
+    else if (paint) {
+        nvgFillPaint(vg, *paint);
+    }
+    nvgFill(vg);
+
+    if (stroke > 0.0) {
+        nvgStrokeColor(vg, strokeColor);
+        nvgStrokeWidth(vg, stroke);
+        nvgStroke(vg);
+    }
+}
 
 void ui_draw_image(const UIState* s, const Rect1& r, const char* name, float alpha) {
     nvgBeginPath(s->vg);
@@ -122,6 +188,15 @@ void ui_draw_line2(const UIState* s, float x[], float y[], int size, NVGcolor* c
         nvgStroke(s->vg);
     }
 }
+#if 0
+void ui_draw_rect(NVGcontext* vg, const Rect1& r, NVGcolor color, int width, float radius) {
+    nvgBeginPath(vg);
+    radius > 0 ? nvgRoundedRect(vg, r.x, r.y, r.w, r.h, radius) : nvgRect(vg, r.x, r.y, r.w, r.h);
+    nvgStrokeColor(vg, color);
+    nvgStrokeWidth(vg, width);
+    nvgStroke(vg);
+}
+#endif
 
 static inline void fill_rect(NVGcontext* vg, const Rect1& r, const NVGcolor* color, const NVGpaint* paint, float radius) {
     nvgBeginPath(vg);
@@ -419,7 +494,10 @@ protected:
         v_ego = sm["carState"].getCarState().getVEgo();
         brakeHoldActive = sm["carState"].getCarState().getBrakeHoldActive();
         softHoldActive = sm["carState"].getCarState().getSoftHoldActive();
-        longActive = sm["carControl"].getCarControl().getLongActive();
+        auto selfdrive_state = sm["selfdriveState"].getSelfdriveState();
+        longActive = selfdrive_state.getEnabled();
+        //longActive = sm["carControl"].getCarControl().getLongActive();
+        //longActive = sm["carControl"].getCarControl().getEnabled();
         auto lp = sm["longitudinalPlan"].getLongitudinalPlan();
         xState = lp.getXState();
         trafficState = lp.getTrafficState();
@@ -505,6 +583,9 @@ public:
                 if (v_ego < 1.0) {
                     sprintf(str, "%s", (trafficState >= 1000) ? "신호오류" : "신호대기");
                     ui_draw_text(s, x, disp_y, str, disp_size, COLOR_WHITE, BOLD);
+                }
+                else {
+                    ui_draw_text(s, x, disp_y, "신호감속중", disp_size, COLOR_WHITE, BOLD);
                 }
 #if 0
                 else if (getStopDist() > 0.5) {
@@ -676,12 +757,19 @@ private:
     int nRoadLimitSpeed = 20;
     int active_carrot = 0;
 
+    int nGoPosDist = 0;
+    int nGoPosTime = 0;
+
+    QString szSdiDescr = "";
+    QString atc_type;
+
 protected:
     QPointF navi_turn_point[2];
     float navi_turn_point_x[2] = { 0.0, };
     float navi_turn_point_y[2] = { 0.0, };
     bool navi_turn_point_flag = true;
     void drawTurnInfo(const UIState* s) {
+        nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
         if (xDistToTurn < 1500 && xDistToTurn > 0) {
             SubMaster& sm = *(s->sm);
 
@@ -717,11 +805,13 @@ protected:
                 img_x = (int)navi_turn_point_x[0] - size_x / 2;
                 img_y = (int)navi_turn_point_y[0] - size_y;
                 ui_draw_image(s, { img_x, img_y, size_x, size_y }, "ic_navi_point", 1.0f);
+                nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
                 break;
             case 2: case 4:
                 img_x = (int)navi_turn_point_x[1] - size_x / 2;
                 img_y = (int)navi_turn_point_y[1] - size_y;
                 ui_draw_image(s, { img_x, img_y, size_x, size_y }, "ic_navi_point", 1.0f);
+                nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
                 break;
             }
             char str[128] = "";
@@ -737,6 +827,7 @@ protected:
     bool left_dist_flag = true;
 
     void drawSpeedLimit(const UIState* s) {
+        nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
         if (xSpdLimit <= 0) left_dist_flag = true;
         if (xSpdDist > 0) {
             SubMaster& sm = *(s->sm);
@@ -806,11 +897,77 @@ protected:
             }
         }
 	}
+    void drawTurnInfoHud(const UIState* s) {
+#if 0
+        active_carrot = 2;
+        nGoPosDist = 500000;
+        nGoPosTime = 4 * 60 * 60;
+        szSdiDescr = "어린이 보호구역(스쿨존 시작 구간)";
+        xTurnInfo = 1;
+        xDistToTurn = 1000;
+#endif
+
+        if (active_carrot <= 0) return;
+        if (xDistToTurn <= 0 || nGoPosDist <= 0) return;
+        char str[128] = "";
+
+        int tbt_x = s->fb_w - 800;
+        int tbt_y = s->fb_h - 300;
+        ui_fill_rect(s->vg, { tbt_x, tbt_y, 790, 240 }, COLOR_BLACK_ALPHA(120), 30);
+
+        if(xTurnInfo > 0) {
+            int bx = tbt_x + 100;
+            int by = tbt_y + 85;
+            if (atc_type.length() > 0 && !atc_type.contains("prepare")) {
+                ui_fill_rect(s->vg, { bx - 80, by - 65, 160, 210 }, COLOR_GREEN_ALPHA(100), 15);
+            }
+            switch (xTurnInfo) {
+            case 1: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_l", 1.0f); break;
+            case 2: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_r", 1.0f); break;
+            case 3: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_lane_change_l", 1.0f); break;
+            case 4: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_lane_change_r", 1.0f); break;
+            case 7: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_u", 1.0f); break;
+            case 6: ui_draw_text(s, bx, by + 20, "TG", 35, COLOR_WHITE, BOLD); break;
+            case 8: ui_draw_text(s, bx, by + 20, "목적지", 35, COLOR_WHITE, BOLD); break;
+            default:
+                sprintf(str, "감속:%d", xTurnInfo);
+                ui_draw_text(s, bx, by + 20, str, 35, COLOR_WHITE, BOLD, 0.0f, 0.0f);
+                break;
+            }
+            if (xDistToTurn < 1000) sprintf(str, "%d m", xDistToTurn);
+            else  sprintf(str, "%.1f km", xDistToTurn / 1000.f);
+            ui_draw_text(s, bx, by + 120, str, 40, COLOR_WHITE, BOLD);
+        }
+        nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
+        if (szSdiDescr.length() > 0) {
+            float bounds[4];  // [xmin, ymin, xmax, ymax]를 저장하는 배열
+            nvgFontSize(s->vg, 40);
+            nvgTextBounds(s->vg, tbt_x + 200, tbt_y + 200, szSdiDescr.toStdString().c_str(), NULL, bounds);
+            float text_width = bounds[2] - bounds[0];
+            float text_height = bounds[3] - bounds[1];
+            ui_fill_rect(s->vg, { (int)bounds[0] - 10, (int)bounds[1] - 2, (int)text_width + 20, (int)text_height + 13 }, COLOR_GREEN, 10);
+            ui_draw_text(s, tbt_x + 200, tbt_y + 200, szSdiDescr.toStdString().c_str(), 40, COLOR_WHITE, BOLD);
+        }
+        if (nGoPosDist > 0 && nGoPosTime > 0) {
+            time_t now = time(NULL);  // 현재 시간 얻기
+            struct tm* local = localtime(&now);
+            int remaining_minutes = (int)nGoPosTime / 60;
+            local->tm_min += remaining_minutes;
+            mktime(local);
+            sprintf(str, "도착: %.1f분(%02d:%02d)", (float)nGoPosTime / 60., local->tm_hour, local->tm_min);
+            ui_draw_text(s, tbt_x + 190, tbt_y + 80, str, 50, COLOR_WHITE, BOLD);
+            sprintf(str, "%.1fkm", nGoPosDist / 1000.);
+            ui_draw_text(s, tbt_x + 190 + 120, tbt_y + 130, str, 50, COLOR_WHITE, BOLD);
+        }
+    }
 public:
     void draw(const UIState* s) {
         nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
         SubMaster& sm = *(s->sm);
-        if (!sm.alive("modelV2") || !sm.alive("carrotMan") || !sm.alive("carState")) return;
+        if (!sm.alive("modelV2") || !sm.alive("carrotMan") || !sm.alive("carState")) {
+            active_carrot = -1;
+            return;
+        }
         const auto carrot_man = sm["carrotMan"].getCarrotMan();
         //const auto car_state = sm["carState"].getCarState();
         xSpdLimit = carrot_man.getXSpdLimit();
@@ -820,6 +977,11 @@ public:
         xDistToTurn = carrot_man.getXDistToTurn();
         nRoadLimitSpeed = carrot_man.getNRoadLimitSpeed();
         active_carrot = carrot_man.getActive();
+        atc_type = QString::fromStdString(carrot_man.getAtcType());
+
+        nGoPosDist = carrot_man.getNGoPosDist();
+        nGoPosTime = carrot_man.getNGoPosTime();
+        szSdiDescr = QString::fromStdString(carrot_man.getSzSdiDescr());
 
         int bx = 150;
         int by = 410;
@@ -849,7 +1011,7 @@ public:
             else  sprintf(str, "%.1f km", xSpdDist / 1000.f);
             ui_draw_text(s, bx, by + 120, str, 40, COLOR_WHITE, BOLD);
         }
-        else if(xTurnInfo > 0) {
+        else if(false && xTurnInfo > 0) {
             switch (xTurnInfo) {
             case 1: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_l", 1.0f); break;
             case 2: ui_draw_image(s, { bx - icon_size / 2, by - icon_size / 2, icon_size, icon_size }, "ic_turn_r", 1.0f); break;
@@ -872,11 +1034,14 @@ public:
             sprintf(str, "%d", nRoadLimitSpeed);
             ui_draw_text(s, bx, by + 75, str, 50, COLOR_BLACK, BOLD, 0.0f, 0.0f);
         }
-
         drawTurnInfo(s);
         drawSpeedLimit(s);
+        drawTurnInfoHud(s);
+
     }
 };
+bool _right_blinker = false;
+bool _left_blinker = false;
 class DesireDrawer : ModelDrawer {
 protected:
     int icon_size = 256;
@@ -936,9 +1101,17 @@ public:
         bool left_blinker = car_state.getLeftBlinker() || atc_type=="fork left" || atc_type =="turn left";
         bool right_blinker = car_state.getRightBlinker() || atc_type=="fork right" || atc_type =="turn right";
 
+        _right_blinker = false;
+        _left_blinker = false;
         if (blinker_timer <= 8) {
-            if (right_blinker) ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_r", 1.0f);
-            if (left_blinker) ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_l", 1.0f);
+            if (right_blinker) {
+		_right_blinker = true;
+                ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_r", 1.0f);
+            }
+            if (left_blinker) {
+		_left_blinker = true;
+                ui_draw_image(s, { x - icon_size / 2, y - icon_size / 2, icon_size, icon_size }, "ic_blinker_l", 1.0f);
+            }
         }
     }
 };
@@ -1036,11 +1209,14 @@ private:
     int     show_path_color = 14;
     int     show_path_mode_normal = 13;
     int     show_path_color_normal = 14;
+    int     show_path_mode_lane = 13;
+    int     show_path_color_lane = 14;
     int     show_path_mode_cruise_off = 13;
     int     show_path_color_cruise_off = 14;
     float   show_path_width = 1.0;
     Params  params;
     int     params_count = 0;
+    bool    active_lane_line = false;
 
 protected:
     void update_line_data2(const UIState* s, const cereal::XYZTData::Reader& line,
@@ -1094,7 +1270,7 @@ protected:
         float   dist = 2.0;// , dist_dt = 1.;
         bool    exit = false;
         //printf("\ndist = ");
-        for (int i = 0; !exit; i++, dist = dist + dist * 0.15) {
+        for (; !exit; dist = dist + dist * 0.15) {
             //dist_dt += (i*0.05);
             if (dist >= max_dist) {
                 dist = max_dist;
@@ -1243,6 +1419,7 @@ protected:
 		SubMaster& sm = *(s->sm);
 		if (!sm.alive("modelV2") || !sm.alive("carState")) return false;
         const cereal::ModelDataV2::Reader& model = sm["modelV2"].getModelV2();
+        active_lane_line = sm["controlsState"].getControlsState().getActiveLaneLine();
         auto model_position = model.getPosition();
         float max_distance = s->max_distance;
         max_distance -= 2.0;
@@ -1255,8 +1432,14 @@ protected:
             show_path_color = show_path_color_cruise_off;
         }
         else {
-			show_path_mode = show_path_mode_normal;
-			show_path_color = show_path_color_normal;
+			if (active_lane_line) {
+				show_path_mode = show_path_mode_lane;
+				show_path_color = show_path_color_lane;
+			}
+            else {
+                show_path_mode = show_path_mode_normal;
+                show_path_color = show_path_color_normal;
+            }
         }
 
         if (show_path_mode == 0) {
@@ -1276,6 +1459,8 @@ public:
         if (params_count == 0) {
             show_path_mode_normal = params.getInt("ShowPathMode");
             show_path_color_normal = params.getInt("ShowPathColor");
+            show_path_mode_lane = params.getInt("ShowPathModeLane");
+            show_path_color_lane = params.getInt("ShowPathColorLane");
             show_path_mode_cruise_off = params.getInt("ShowPathModeCruiseOff");
             show_path_color_cruise_off = params.getInt("ShowPathColorCruiseOff");
         }
@@ -1512,6 +1697,7 @@ private:
 #include <QJsonValue>
 #include <QJsonArray>
 
+char    carrot_man_debug[128] = "";
 class DrawCarrot : public QObject {
     Q_OBJECT
 
@@ -1532,7 +1718,6 @@ public:
     int     trafficState = 0;
     int     trafficState_carrot = 0;
     int     active_carrot = 0;
-    char    carrot_man_debug[128] = "";
     float   xTarget = 0.0;
 
     QString szPosRoadName = "";
@@ -1554,7 +1739,8 @@ public:
         auto model_position = model.getPosition();
 
         if (!cs_alive || !car_control_alive || !car_state_alive || !lp_alive) return;
-        longActive = car_control.getLongActive();
+        auto selfdrive_state = sm["selfdriveState"].getSelfdriveState();
+        longActive = selfdrive_state.getEnabled();
         latActive = car_control.getLatActive();
 
         v_cruise = car_state.getVCruiseCluster();
@@ -1567,10 +1753,12 @@ public:
             szPosRoadName = QString::fromStdString(carrot_man.getSzPosRoadName());
             QString atcType = QString::fromStdString(carrot_man.getAtcType());
             trafficState_carrot = carrot_man.getTrafficState();
+            const auto velocity = model.getVelocity();
 
             auto meta = sm["modelV2"].getModelV2().getMeta();
             QString desireLog = QString::fromStdString(meta.getDesireLog());
-            sprintf(carrot_man_debug, "%s, %dkm/h TBT(%d): %dm, CAM(%d): %dkm/h, %dm, ATC(%s), T(%d)",
+            sprintf(carrot_man_debug, "model_kph= %d, %s, %dkm/h TBT(%d): %dm, CAM(%d): %dkm/h, %dm, ATC(%s), T(%d)",
+                (int)(velocity.getX()[32] * 3.6),
                 desireLog.toStdString().c_str(),
                 carrot_man.getDesiredSpeed(),
                 carrot_man.getXTurnInfo(),
@@ -1601,8 +1789,10 @@ public:
         }
 	}
     void drawDebug(UIState* s) {
-        nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
-        ui_draw_text(s, s->fb_w, s->fb_h, carrot_man_debug, 35, COLOR_WHITE, BOLD, 1.0f, 1.0f);
+        if (params.getInt("ShowDebugUI") > 0) {
+            nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+            ui_draw_text(s, s->fb_w, s->fb_h - 10, carrot_man_debug, 35, COLOR_WHITE, BOLD, 1.0f, 1.0f);
+        }
     }
     char    cruise_speed_last[32] = "";
     char    driving_mode_str_last[32] = "";
@@ -1718,9 +1908,11 @@ public:
                 ui_draw_text(s, 170, y + 70, str, 60, COLOR_WHITE, BOLD, 3.0f, 8.0f);
                 nav_y += 70;
             }
-            nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
-            ui_draw_text(s, 50, nav_y, szPosRoadName.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
-            nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+            if (szPosRoadName.size() > 0) {
+                nvgTextAlign(s->vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
+                ui_draw_text(s, 50, nav_y, szPosRoadName.toStdString().c_str(), 35, COLOR_WHITE, BOLD, 3.0f, 8.0f);
+                nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+            }
         }
     }
     void drawConnInfo(const UIState* s) {
@@ -1766,6 +1958,7 @@ public:
         return str;
     }
     void drawTpms(const UIState* s) {
+        nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
         SubMaster& sm = *(s->sm);
         auto car_state = sm["carState"].getCarState();
 
@@ -1780,6 +1973,37 @@ public:
         ui_draw_text(s, bx + 90, by - 55, get_tpms_text(fr), 38, get_tpms_color(fr), BOLD);
         ui_draw_text(s, bx - 90, by + 80, get_tpms_text(rl), 38, get_tpms_color(rl), BOLD);
         ui_draw_text(s, bx + 90, by + 80, get_tpms_text(rr), 38, get_tpms_color(rr), BOLD);
+    }
+    void drawDeviceInfo(const UIState* s) {
+        nvgTextAlign(s->vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        SubMaster& sm = *(s->sm);
+        auto deviceState = sm["deviceState"].getDeviceState();
+        const auto freeSpace = deviceState.getFreeSpacePercent();
+        const auto memoryUsage = deviceState.getMemoryUsagePercent();
+        const auto cpuTempC = deviceState.getCpuTempC();
+        const auto cpuUsagePercent = deviceState.getCpuUsagePercent();
+        float cpuTemp = 0.0f;
+        QString str = "";
+        int   size = sizeof(cpuTempC) / sizeof(cpuTempC[0]);
+        if (size > 0) {
+            for (int i = 0; i < size; i++) {
+                cpuTemp += cpuTempC[i];
+            }
+            cpuTemp /= static_cast<float>(size);
+        }
+        float cpuUsage = 0.0f;
+        size = sizeof(cpuUsagePercent) / sizeof(cpuUsagePercent[0]);
+        if (size > 0) {
+            int cpu_size = 0;
+            for (cpu_size = 0; cpu_size < size; cpu_size++) {
+                if (cpuUsagePercent[cpu_size] <= 0) break;
+                cpuUsage += cpuUsagePercent[cpu_size];
+            }
+            if (cpu_size > 0) cpuUsage /= cpu_size;
+        }
+        str.sprintf("MEM:%d%% DISK:%.0f%% CPU:%.0f%%,%.0f\u00B0C", memoryUsage, freeSpace, cpuUsage, cpuTemp);
+        NVGcolor top_right_color = (cpuTemp > 85.0 || memoryUsage > 85.0) ? COLOR_ORANGE : COLOR_WHITE;
+		ui_draw_text(s, s->fb_w - 10, 2, str.toStdString().c_str(), 30, top_right_color, BOLD, 1.0f, 1.0f);
     }
 
 };
@@ -1832,6 +2056,7 @@ void ui_draw(UIState *s, ModelRenderer* model_renderer, int w, int h) {
   drawCarrot.drawDebug(s);
   drawCarrot.drawDateTime(s);
   drawCarrot.drawConnInfo(s);
+  drawCarrot.drawDeviceInfo(s);
   drawCarrot.drawTpms(s);
 
   drawTurnInfo.draw(s);
@@ -1842,6 +2067,134 @@ void ui_draw(UIState *s, ModelRenderer* model_renderer, int w, int h) {
   nvgResetScissor(s->vg);
   nvgEndFrame(s->vg);
   glDisable(GL_BLEND);
+}
+
+class BorderDrawer {
+protected:
+    float   a_ego_width = 0.0;
+    float steering_angle_pos = 0.0;
+public:
+    void draw(UIState *s, int w, int h, NVGcolor bg, NVGcolor bg_long) {
+        NVGcontext* vg = s->vg_border;
+
+        ui_fill_rect(vg, { 0,0, w, h / 2  - 100}, bg, 15);
+        ui_fill_rect(vg, { 0, h / 2 + 100, w, h }, bg_long, 15);
+
+        ui_fill_rect(vg, {w - 50, h/2 - 95, 50, 190}, (_right_blinker)?COLOR_ORANGE:COLOR_BLACK, 15);
+        ui_fill_rect(vg, {0, h/2 - 95, 50, 190}, (_left_blinker)?COLOR_ORANGE:COLOR_BLACK, 15);
+
+        const SubMaster& sm = *(s->sm);
+        auto car_state = sm["carState"].getCarState();
+        float a_ego = car_state.getAEgo();
+
+        a_ego_width = a_ego_width * 0.5 + (w * std::abs(a_ego) / 4.0) * 0.5;
+        ui_fill_rect(vg, { w/2 - (int)(a_ego_width / 2), h - 30, (int)a_ego_width, 30 }, (a_ego >= 0)? COLOR_YELLOW : COLOR_RED, 15);
+
+        steering_angle_pos = steering_angle_pos * 0.5 + (w / 2. - w / 2. * car_state.getSteeringAngleDeg() / 180) * 0.5;
+        int x_st = (int)steering_angle_pos - 50;
+        int x_ed = (int)steering_angle_pos + 50;
+        if (x_st < 0) x_st = 0;
+        if (x_ed < 50) x_ed = 50;
+        if (x_st > w - 50) x_st = w - 50;
+        if (x_ed > w) x_ed = w;
+        ui_fill_rect(vg, { x_st, 0, x_ed - x_st, 30 }, COLOR_ORANGE, 15);
+
+
+        char top[256] = "", top_left[256] = "", top_right[256] = "";
+        char bottom[256] = "", bottom_left[256] = "", bottom_right[256] = "";
+
+        QString str;
+
+        // top
+        str = QString::fromStdString(car_state.getLogCarrot());
+        sprintf(top, "%s", str.toStdString().c_str());
+        // top_right
+        const auto live_torque_params = sm["liveTorqueParameters"].getLiveTorqueParameters();
+        str.sprintf("LT[%.0f]:%s (%.4f/%.4f)",
+            live_torque_params.getTotalBucketPoints(), live_torque_params.getLiveValid() ? "ON" : "OFF", live_torque_params.getLatAccelFactorFiltered(), live_torque_params.getFrictionCoefficientFiltered());
+        sprintf(top_right, "%s", str.toStdString().c_str());
+
+        //top_left
+        Params params = Params();
+        QString carName = QString::fromStdString(params.get("CarName"));
+        bool longitudinal_control = sm["carParams"].getCarParams().getOpenpilotLongitudinalControl();
+        if (params.getInt("HyundaiCameraSCC") > 0) {
+            carName += "(CAMERA SCC)";
+        }
+        else if (longitudinal_control) {
+            carName += " - OP Long";
+        }
+        sprintf(top_left, "%s", carName.toStdString().c_str());
+
+        // bottom
+        const auto lat_plan = sm["lateralPlan"].getLateralPlan();
+        str = lat_plan.getLatDebugText().cStr();
+        strcpy(bottom, str.toStdString().c_str());
+
+        // bottom_left
+        QString gitBranch = QString::fromStdString(params.get("GitBranch"));
+        sprintf(bottom_left, "%s", gitBranch.toStdString().c_str());
+
+        // bottom_right
+        Params params_memory = Params("/dev/shm/params");
+        if (false && carrot_man_debug[0] != 0 && params.getInt("ShowDebugUI") > 0) {
+            strcpy(bottom_right, carrot_man_debug);
+        }
+        else {
+            QString ipAddress = QString::fromStdString(params_memory.get("NetworkAddress"));
+            //extern QString gitBranch;
+            sprintf(bottom_right, "%s", ipAddress.toStdString().c_str());
+        }
+
+        int text_margin = 30;
+        // top
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+        ui_draw_text_vg(vg, w / 2, 0, top, 30, COLOR_WHITE, BOLD);
+        // top left
+        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        ui_draw_text_vg(vg, text_margin, 0, top_left, 30, COLOR_WHITE, BOLD);
+        // top right
+        nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+        ui_draw_text_vg(vg, w - text_margin, 0, top_right, 30, COLOR_WHITE, BOLD);
+        // bottom
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM);
+        ui_draw_text_vg(vg, w / 2, h, bottom, 30, COLOR_WHITE, BOLD);
+        // bottom left
+        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM);
+        ui_draw_text_vg(vg, text_margin, h, bottom_left, 30, COLOR_WHITE, BOLD);
+        // bottom right
+        nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        ui_draw_text_vg(vg, w- text_margin, h, bottom_right, 30, COLOR_WHITE, BOLD);
+
+    }
+};
+NVGcolor QColorToNVGcolor(const QColor& color) {
+    return nvgRGBAf(color.redF(), color.greenF(), color.blueF(), color.alphaF());
+}
+BorderDrawer borderDrawer;
+void ui_draw_border(UIState* s, int w, int h, QColor bg, QColor bg_long) {
+
+    if (s->vg_border == nullptr) {
+        s->vg_border = nvgCreate(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
+        std::pair<const char*, const char*> fonts[] = {
+            {"KaiGenGothicKR-Bold", "../assets/addon/font/KaiGenGothicKR-Bold.ttf"},
+        };
+        for (auto [name, file] : fonts) {
+            int font_id = nvgCreateFont(s->vg_border, name, file);
+            assert(font_id >= 0);
+        }
+    }
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glViewport(0, 0, w, h);
+    nvgBeginFrame(s->vg_border, w, h, 1.0f);
+	nvgScissor(s->vg_border, 0, 0, w, h);
+
+    borderDrawer.draw(s, w, h, QColorToNVGcolor(bg), QColorToNVGcolor(bg_long));
+
+    nvgResetScissor(s->vg_border);
+    nvgEndFrame(s->vg_border);
+    glDisable(GL_BLEND);
 }
 void ui_draw_alert(UIState* s) {
     if (alert.size != cereal::SelfdriveState::AlertSize::NONE) {
